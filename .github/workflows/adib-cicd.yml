@@ -1,0 +1,159 @@
+name: Almasdar Ci-CD
+
+on: 
+  push:
+    branches:
+      - Dev
+      - UAT
+      - main
+
+  pull_request:
+    branches:
+      - Dev
+      - UAT
+      - main
+
+  workflow_dispatch:
+
+permissions: 
+  contents: read
+  id-token: write
+
+env:
+  DOTNET_Version: '6.0.x'
+  COFIGURATION: Release
+
+jobs:
+
+  # ===================================
+  # BUILD
+  # ===================================
+  build:
+    name: Build and Publish APIs
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ----------------------------------
+      # Checkout source code
+      # ----------------------------------
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      # --------------------------------------------------------
+      # Install .NET 6 SDK
+      # --------------------------------------------------------
+      - name: Setup .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # --------------------------------------------------------
+      # Display SDK information
+      # --------------------------------------------------------
+      - name: Display .NET information
+        run: dotnet --info
+
+      # --------------------------------------------------------
+      # Restore only required projects
+      # DocumentsSearch and UnitTest projects are excluded
+      # --------------------------------------------------------
+      - name: Restore projects
+        run: |
+          dotnet restore eLibrary/eLibrary.csproj
+          dotnet restore UserManagement/UserManagement.csproj
+
+      # --------------------------------------------------------
+      # Build APIs
+      # --------------------------------------------------------
+      - name: Build eLibrary
+        run: >
+          dotnet build eLibrary/eLibrary.csproj
+          --configuration ${{ env.CONFIGURATION }}
+          --no-restore
+
+      - name: Build UserManagement
+        run: >
+          dotnet build UserManagement/UserManagement.csproj
+          --configuration ${{ env.CONFIGURATION }}
+          --no-restore
+     
+      # ========================================================
+      # PUBLISH
+      # ========================================================
+      - name: Publish eLibrary
+        run: >
+          dotnet publish eLibrary/eLibrary.csproj
+          --configuration ${{ env.CONFIGURATION }}
+          --no-build
+          --output ./publish/eLibrary
+
+      - name: Publish UserManagement
+        run: >
+          dotnet publish UserManagement/UserManagement.csproj
+          --configuration ${{ env.CONFIGURATION }}
+          --no-build
+          --output ./publish/UserManagement
+
+      # --------------------------------------------------------
+      # Upload all published APIs as one artifact
+      # --------------------------------------------------------
+      - name: Upload deployment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adib-api-packages
+          path: ./publish
+          retention-days: 10
+          
+  # ============================================================
+  # DEV DEPLOYMENT
+  # Branch: develop 
+  # ============================================================
+  deploy-dev:
+    name: Deploy to DEV
+    
+    if: |
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/Dev'
+    
+    needs: build
+    
+    runs-on: ubuntu-latest
+    
+    environment:
+        name: DEV
+    
+    steps:
+    
+        - name: Download deployment artifact
+          uses: actions/download-artifact@v4
+          with:
+            name: adib-api-packages
+            path: ./publish
+    
+        - name: Azure Login
+          uses: azure/login@v2
+          with:
+            client-id: ${{ secrets.AZURE_CLIENT_ID }}
+            tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+            subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    
+        - name: Deploy eLibrary
+          uses: azure/webapps-deploy@v3
+          with:
+            app-name: ${{ vars.ELIBRARY_APP_NAME }}
+            package: ./publish/eLibrary
+    
+        - name: Deploy UserManagement
+          uses: azure/webapps-deploy@v3
+          with:
+            app-name: ${{ vars.USERMANAGEMENT_APP_NAME }}
+            package: ./publish/UserManagement
+
+ 
+    
+
+
+
+
+          
