@@ -19,15 +19,25 @@ builder.Services.AddTransient<IDataClass1, DataClass1>();
 builder.Services.AddTransient<IHTTPRequestService, HTTPRequestService>();
 
 // Enable the keyvalt logic to create release package
-string vaultUri = builder.Configuration["KeyVault:VaultUri"];
-string secretName = builder.Configuration["KeyVault:SqlConnSecretName"];
-var keyVaultService = new KeyVaultService(vaultUri);
-string connectionString = keyVaultService.GetSecret(secretName);
-builder.Services.AddSingleton<IKeyVaultService>(new KeyVaultService(vaultUri));
+//string vaultUri = builder.Configuration["KeyVault:VaultUri"];
+//string secretName = builder.Configuration["KeyVault:SqlConnSecretName"];
+//var keyVaultService = new KeyVaultService(vaultUri);
+//string connectionString = keyVaultService.GetSecret(secretName);
+//builder.Services.AddSingleton<IKeyVaultService>(new KeyVaultService(vaultUri));
+//builder.Services.AddDbContext<ApplicationDbContext>(options =>
+//{
+//    options.UseSqlServer(connectionString);
+//});
+
+#region Uncomment to run the solution in the localhost
+builder.Services.AddSingleton<DataLakeHandler>();
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
-    options.UseSqlServer(connectionString);
+    options.UseSqlServer(builder.Configuration.GetValue<string>("ConnectionStrings:DefaultConnection")
+    //builder => builder.EnableRetryOnFailure()
+    );
 });
+#endregion
 
 // enable the below code to run in local machine
 //builder.Services.AddDbContext<ApplicationDbContext>(options =>
