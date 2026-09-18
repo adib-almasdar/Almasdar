@@ -33,7 +33,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 //builder.Services.AddSingleton<DataLakeHandler>();
 //builder.Services.AddDbContext<ApplicationDbContext>(options =>
 //{
-//    options.UseSqlServer(builder.Configuration.GetValue<string>("ConnectionStrings:DefaultConnection")
+//    options.UseSqlServer(builder.Configuration.GetValue<string>("ConnectionStrings:DefaultConnection"),
 //    builder => builder.EnableRetryOnFailure()
 //    );
 //});
