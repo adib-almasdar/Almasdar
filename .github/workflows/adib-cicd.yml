@@ -123,7 +123,7 @@ jobs:
         run: |
           dotnet publish eLibrary/eLibrary.csproj \
           --configuration ${{ env.CONFIGURATION }} \
-          --no-build
+          --no-build \
           --output ./publish/eLibrary
           
       # ========================================================
@@ -141,7 +141,7 @@ jobs:
         run: |
           dotnet publish UserManagement/UserManagement.csproj \
           --configuration ${{ env.CONFIGURATION }} \
-          --no-build
+          --no-build \
           --output ./publish/UserManagement
 
       # --------------------------------------------------------
