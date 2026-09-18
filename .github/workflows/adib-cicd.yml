@@ -15,6 +15,9 @@ on:
 
   workflow_dispatch:
 
+# ============================================================
+# GLOBAL PERMISSIONS
+# ============================================================
 permissions: 
   contents: read
   id-token: write
@@ -23,13 +26,55 @@ env:
   DOTNET_Version: '6.0.x'
   COFIGURATION: Release
 
+# ============================================================
+# 1. DETECT CHANGED MODULES
+# ============================================================
 jobs:
+
+  detect-changes:
+    name: Detect Changed Modules
+    runs-on: ubuntu-latest
+
+    outputs:
+      elibrary: ${{ steps.filter.outputs.elibrary }}
+      usermanagement: ${{ steps.filter.outputs.usermanagement }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Changed Modules
+        id: filter
+        uses: dorny/path-filter@v3
+        with:
+          filters: |
+
+            # ==================================================
+            # eLibrary
+            # ==================================================
+            elibrary:
+              - 'eLibrary/**'
+
+              #Common files/folders realted to eLibrary
+              - 'Common/eLibrary/**'
+
+            # ==================================================
+            # UserManagement
+            # ==================================================
+            usermanagement:
+              - 'UserManagement/**'
+
+              # Common files/folders related to UserManagement
+              - 'Common/UserManagement/**'
 
   # ===================================
   # BUILD
   # ===================================
   build:
     name: Build and Publish APIs
+    needs: detect-changes
     runs-on: ubuntu-latest
 
     steps:
@@ -55,54 +100,59 @@ jobs:
         run: dotnet --info
 
       # --------------------------------------------------------
-      # Restore only required projects
-      # DocumentsSearch and UnitTest projects are excluded
+      # Restore Solution
+      #
+      # Restore is done once. Only changed projects are
+      # subsequently published.
       # --------------------------------------------------------
       - name: Restore projects
-        run: |
-          dotnet restore eLibrary/eLibrary.csproj
-          dotnet restore UserManagement/UserManagement.csproj
+        run: dotnet restore ADIBSolution.sln
 
       # --------------------------------------------------------
-      # Build APIs
+      # eLibrary
       # --------------------------------------------------------
       - name: Build eLibrary
-        run: >
+        if: needs.detect-changes.outputs.elibrary == 'true'
+        run: |
           dotnet build eLibrary/eLibrary.csproj
           --configuration ${{ env.CONFIGURATION }}
           --no-restore
 
-      - name: Build UserManagement
-        run: >
-          dotnet build UserManagement/UserManagement.csproj
-          --configuration ${{ env.CONFIGURATION }}
-          --no-restore
-     
-      # ========================================================
-      # PUBLISH
-      # ========================================================
       - name: Publish eLibrary
-        run: >
+        if: needs.detect-changes.outputs.elibrary == 'true'
+        run: |
           dotnet publish eLibrary/eLibrary.csproj
           --configuration ${{ env.CONFIGURATION }}
           --no-build
           --output ./publish/eLibrary
-
+          
+      # ========================================================
+      # UserManagement
+      # =======================================================
+      - name: Build UserManagement
+        if: needs.detect-changes.outputs.usermanagement == 'true'
+        run: |
+          dotnet build UserManagement/UserManagement.csproj \
+            --configuration Release \
+            --no-restore
+            
       - name: Publish UserManagement
-        run: >
+        if: needs.detect-changes.outputs.usermanagement == 'true'
+        run: |
           dotnet publish UserManagement/UserManagement.csproj
           --configuration ${{ env.CONFIGURATION }}
           --no-build
           --output ./publish/UserManagement
 
       # --------------------------------------------------------
-      # Upload all published APIs as one artifact
+      # Upload Changed Packages
       # --------------------------------------------------------
       - name: Upload deployment artifact
         uses: actions/upload-artifact@v4
         with:
           name: adib-api-packages
           path: ./publish
+          if-no-files-found: error
           retention-days: 10
           
   # ============================================================
@@ -116,7 +166,9 @@ jobs:
       github.event_name == 'push' &&
       github.ref == 'refs/heads/Dev'
     
-    needs: build
+    needs: 
+      - detect-changes
+      - build
     
     runs-on: ubuntu-latest
     
@@ -125,26 +177,40 @@ jobs:
     
     steps:
     
+        # --------------------------------------------------------
+        # Download artifact
+        # --------------------------------------------------------
         - name: Download deployment artifact
           uses: actions/download-artifact@v4
           with:
             name: adib-api-packages
             path: ./publish
-    
+
+        # --------------------------------------------------------
+        # Azure OIDC Login
+        # --------------------------------------------------------
         - name: Azure Login
           uses: azure/login@v2
           with:
             client-id: ${{ secrets.AZURE_CLIENT_ID }}
             tenant-id: ${{ secrets.AZURE_TENANT_ID }}
             subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-    
+
+        # --------------------------------------------------------
+        # eLibrary
+        # --------------------------------------------------------
         - name: Deploy eLibrary
+          if: needs.detect-changes.outputs.elibrary == 'true'
           uses: azure/webapps-deploy@v3
           with:
             app-name: ${{ vars.ELIBRARY_APP_NAME }}
             package: ./publish/eLibrary
-    
+
+        # --------------------------------------------------------
+        # UserManagement
+        # --------------------------------------------------------
         - name: Deploy UserManagement
+          if: needs.detect-changes.outputs.usermanagement == 'true'
           uses: azure/webapps-deploy@v3
           with:
             app-name: ${{ vars.USERMANAGEMENT_APP_NAME }}
