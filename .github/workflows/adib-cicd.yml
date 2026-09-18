@@ -114,15 +114,15 @@ jobs:
       - name: Build eLibrary
         if: needs.detect-changes.outputs.elibrary == 'true'
         run: |
-          dotnet build eLibrary/eLibrary.csproj
-          --configuration ${{ env.CONFIGURATION }}
+          dotnet build eLibrary/eLibrary.csproj \
+          --configuration ${{ env.CONFIGURATION }} \
           --no-restore
 
       - name: Publish eLibrary
         if: needs.detect-changes.outputs.elibrary == 'true'
         run: |
-          dotnet publish eLibrary/eLibrary.csproj
-          --configuration ${{ env.CONFIGURATION }}
+          dotnet publish eLibrary/eLibrary.csproj \
+          --configuration ${{ env.CONFIGURATION }} \
           --no-build
           --output ./publish/eLibrary
           
@@ -139,8 +139,8 @@ jobs:
       - name: Publish UserManagement
         if: needs.detect-changes.outputs.usermanagement == 'true'
         run: |
-          dotnet publish UserManagement/UserManagement.csproj
-          --configuration ${{ env.CONFIGURATION }}
+          dotnet publish UserManagement/UserManagement.csproj \
+          --configuration ${{ env.CONFIGURATION }} \
           --no-build
           --output ./publish/UserManagement
 
