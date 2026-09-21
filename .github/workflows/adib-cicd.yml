@@ -1,0 +1,304 @@
+name: Almasdar Ci-CD
+
+on: 
+  push:
+    branches:
+      - Dev
+      - UAT
+      - main
+
+  pull_request:
+    branches:
+      - Dev
+      - UAT
+      - main
+
+  workflow_dispatch:
+    inputs:
+
+      environment:
+        description: 'Select environment'
+        required: true
+        type: choice
+        options:
+          - Dev
+          - UAT
+          - PROD
+
+      deploy_elibrary:
+        description: 'Deploy eLibrary'
+        required: true
+        type: boolean
+        default: false
+
+      deploy_usermanagement:
+        description: 'Deploy UserManagement'
+        required: true
+        type: boolean
+        default: false
+
+# ============================================================
+# GLOBAL PERMISSIONS
+# ============================================================
+permissions: 
+  contents: read
+  id-token: write
+
+env:
+  DOTNET_Version: '6.0.x'
+  COFIGURATION: Release
+
+# ============================================================
+# 1. DETECT CHANGED MODULES
+# ============================================================
+jobs:
+
+  detect-changes:
+    name: Detect Changed Modules
+    runs-on: ubuntu-latest
+
+    outputs:
+      elibrary: ${{ steps.filter.outputs.elibrary }}
+      usermanagement: ${{ steps.filter.outputs.usermanagement }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Changed Modules
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+
+            # ==================================================
+            # eLibrary
+            # ==================================================
+            elibrary:
+              - 'eLibrary/**'
+
+              #Common files/folders realted to eLibrary
+              - 'Common/eLibrary/**'
+
+            # ==================================================
+            # UserManagement
+            # ==================================================
+            usermanagement:
+              - 'UserManagement/**'
+
+              # Common files/folders related to UserManagement
+              - 'Common/UserManagement/**'
+
+  # ===================================
+  # BUILD
+  # ===================================
+  build:
+    name: Build and Publish APIs
+    needs: detect-changes
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ----------------------------------
+      # Checkout source code
+      # ----------------------------------
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      # -----------------------------------
+      # Validate selected modules
+      # -----------------------------------
+      - name: Validate selected modules
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          if [[ "${{ inputs.deploy_elibrary }}" != "true" &&
+                "${{ inputs.deploy_usermanagement }}" != "true" ]]; then
+            echo "ERROR: Select at least one module to deploy."
+            exit 1
+          fi
+
+      # -----------------------------------
+      # Validate branch and environment
+      # -----------------------------------
+      - name: Validate branch and environment
+        shell: bash
+        run: |
+          branch="${GITHUB_REF_NAME}"
+          environment="${{ inputs.environment }}"
+
+          if [[ "$environment" == "Dev" && "$branch" != "Dev" ]]; then
+            echo "DEV deployments must use the Dev branch."
+            exit 1
+          fi
+
+          if [[ "$environment" == "UAT" && "$branch" != "UAT" ]]; then
+            echo "UAT deployments must use the UAT branch."
+            exit 1
+          fi
+
+          if [[ "$environment" == "PROD" && "$branch" != "main" ]]; then
+            echo "PROD deployments must use the main branch."
+            exit 1
+          fi
+          
+      # --------------------------------------------------------
+      # Install .NET 6 SDK
+      # --------------------------------------------------------
+      - name: Setup .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # --------------------------------------------------------
+      # Display SDK information
+      # --------------------------------------------------------
+      - name: Display .NET information
+        run: dotnet --info
+
+      # --------------------------------------------------------
+      # Restore Solution
+      #
+      # Restore is done once. Only changed projects are
+      # subsequently published.
+      # --------------------------------------------------------
+      - name: Restore projects
+        run: dotnet restore ADIBSolution.sln
+
+      # --------------------------------------------------------
+      # eLibrary
+      # --------------------------------------------------------
+      - name: Build eLibrary
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true
+           
+        run: |
+          dotnet build eLibrary/eLibrary.csproj \
+          --configuration ${{ env.CONFIGURATION }} \
+          --no-restore
+
+      - name: Publish eLibrary
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true
+        run: |
+          dotnet publish eLibrary/eLibrary.csproj \
+          --configuration ${{ env.CONFIGURATION }} \
+          --no-build \
+          --output ./publish/eLibrary
+          
+      # ========================================================
+      # UserManagement
+      # =======================================================
+      - name: Build UserManagement
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true
+        run: |
+          dotnet build UserManagement/UserManagement.csproj \
+            --configuration Release \
+            --no-restore
+            
+      - name: Publish UserManagement
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true
+        run: |
+          dotnet publish UserManagement/UserManagement.csproj \
+          --configuration ${{ env.CONFIGURATION }} \
+          --no-build \
+          --output ./publish/UserManagement
+
+      # --------------------------------------------------------
+      # Verify deployment packages
+      # --------------------------------------------------------
+      - name: Verify deployment packages
+        run: |
+          echo "Published packages:"
+          find ./publish -maxdepth 2 -type f | head -50
+
+          if [ ! -d "./publish" ] || [ -z "$(find ./publish -type f -print -quit)" ]; then
+            echo "ERROR: No deployment packages were generated."
+            exit 1
+          fi
+
+      # --------------------------------------------------------
+      # Upload Changed Packages
+      # --------------------------------------------------------
+      - name: Upload deployment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adib-api-packages
+          path: ./publish
+          if-no-files-found: error
+          retention-days: 10
+          
+  # ============================================================
+  # DEV DEPLOYMENT
+  # Branch: develop 
+  # ============================================================
+  deploy-dev:
+    name: Deploy to DEV
+    
+    if: |
+      ( 
+        github.event_name == 'push' &&
+        github.ref == 'refs/heads/Dev'
+      )
+      ||
+      (
+        github.event_name == 'workflow_dispatch' &&
+        inputs.environment == 'DEV'
+      )
+    needs: 
+      - detect-changes
+      - build
+    
+    runs-on: ubuntu-latest
+    
+    environment:
+        name: ${{ inputs.environment || (github.ref_name == 'Dev' && 'Dev') || (github.ref_name == 'UAT' && 'UAT') || (github.ref_name == 'main' && 'PROD') }}
+    
+    steps:
+    
+        # --------------------------------------------------------
+        # Download artifact
+        # --------------------------------------------------------
+        - name: Download deployment artifact
+          uses: actions/download-artifact@v4
+          with:
+            name: adib-api-packages
+            path: ./publish
+
+        # --------------------------------------------------------
+        # Azure OIDC Login
+        # --------------------------------------------------------
+        - name: Azure Login
+          uses: azure/login@v2
+          with:
+            client-id: ${{ secrets.AZURE_CLIENT_ID }}
+            tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+            subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+        # --------------------------------------------------------
+        # eLibrary
+        # --------------------------------------------------------
+        - name: Deploy eLibrary
+          if: inputs.deploy_elibrary == true
+          uses: azure/webapps-deploy@v3
+          with:
+            app-name: ${{ vars.ELIBRARY_APP_NAME }}
+            package: ./publish/eLibrary
+
+        # --------------------------------------------------------
+        # UserManagement
+        # --------------------------------------------------------
+        - name: Deploy UserManagement
+          if: inputs.deploy_usermanagement == true
+          uses: azure/webapps-deploy@v3
+          with:
+            app-name: ${{ vars.USERMANAGEMENT_APP_NAME }}
+            package: ./publish/UserManagement
+
+ 
+    
+
+
+
+
+          
