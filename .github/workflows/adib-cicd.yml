@@ -14,6 +14,28 @@ on:
       - main
 
   workflow_dispatch:
+    inputs:
+
+      environment:
+        description: 'Select environment'
+        required: true
+        type: choice
+        options:
+          - DEV
+          - UAT
+          - main
+
+      deploy_elibrary:
+        description: 'Deploy eLibrary'
+        required: true
+        type: boolean
+        default: false
+
+      deploy_usermanagement:
+        description: 'Deploy UserManagement'
+        required: true
+        type: boolean
+        default: false
 
 # ============================================================
 # GLOBAL PERMISSIONS
@@ -112,14 +134,18 @@ jobs:
       # eLibrary
       # --------------------------------------------------------
       - name: Build eLibrary
-        if: needs.detect-changes.outputs.elibrary == 'true'
+        if: | 
+          needs.detect-changes.outputs.elibrary == 'true' ||
+          inputs.deploy_elibrary == true
         run: |
           dotnet build eLibrary/eLibrary.csproj \
           --configuration ${{ env.CONFIGURATION }} \
           --no-restore
 
       - name: Publish eLibrary
-        if: needs.detect-changes.outputs.elibrary == 'true'
+        if: | 
+          needs.detect-changes.outputs.elibrary == 'true' || 
+          inputs.deploy_elibrary == true
         run: |
           dotnet publish eLibrary/eLibrary.csproj \
           --configuration ${{ env.CONFIGURATION }} \
@@ -130,14 +156,18 @@ jobs:
       # UserManagement
       # =======================================================
       - name: Build UserManagement
-        if: needs.detect-changes.outputs.usermanagement == 'true'
+        if: |
+          needs.detect-changes.outputs.usermanagement == 'true' ||
+          inputs.deploy_usermanagement == true
         run: |
           dotnet build UserManagement/UserManagement.csproj \
             --configuration Release \
             --no-restore
             
       - name: Publish UserManagement
-        if: needs.detect-changes.outputs.usermanagement == 'true'
+        if: | 
+          needs.detect-changes.outputs.usermanagement == 'true' || 
+          inputs.deploy_usermanagement == true
         run: |
           dotnet publish UserManagement/UserManagement.csproj \
           --configuration ${{ env.CONFIGURATION }} \
@@ -147,6 +177,16 @@ jobs:
       # --------------------------------------------------------
       # Upload Changed Packages
       # --------------------------------------------------------
+      - name: Verify deployment packages
+        run: |
+          echo "Published packages:"
+          find ./publish -maxdepth 2 -type f | head -50
+
+          if [ ! -d "./publish" ] || [ -z "$(find ./publish -type f -print -quit)" ]; then
+            echo "ERROR: No deployment packages were generated."
+            exit 1
+          fi
+      
       - name: Upload deployment artifact
         uses: actions/upload-artifact@v4
         with:
@@ -163,9 +203,15 @@ jobs:
     name: Deploy to DEV
     
     if: |
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/Dev'
-    
+      ( 
+        github.event_name == 'push' &&
+        github.ref == 'refs/heads/Dev'
+      )
+      ||
+      (
+        github.event_name == 'workflow_dispatch' &&
+        inputs.environment == 'DEV'
+      )
     needs: 
       - detect-changes
       - build
@@ -200,7 +246,9 @@ jobs:
         # eLibrary
         # --------------------------------------------------------
         - name: Deploy eLibrary
-          if: needs.detect-changes.outputs.elibrary == 'true'
+          if: |
+            needs.detect-changes.outputs.elibrary == 'true' ||
+            inputs.deploy_elibrary == true
           uses: azure/webapps-deploy@v3
           with:
             app-name: ${{ vars.ELIBRARY_APP_NAME }}
@@ -210,7 +258,9 @@ jobs:
         # UserManagement
         # --------------------------------------------------------
         - name: Deploy UserManagement
-          if: needs.detect-changes.outputs.usermanagement == 'true'
+          if: |
+            needs.detect-changes.outputs.usermanagement == 'true' || 
+            inputs.deploy_usermanagement == true
           uses: azure/webapps-deploy@v3
           with:
             app-name: ${{ vars.USERMANAGEMENT_APP_NAME }}
