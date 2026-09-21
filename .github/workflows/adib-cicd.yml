@@ -107,6 +107,16 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
+      - name: Validate selected modules
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          if [[ "${{ inputs.deploy_elibrary }}" != "true" &&
+                "${{ inputs.deploy_usermanagement }}" != "true" ]]; then
+            echo "ERROR: Select at least one module to deploy."
+            exit 1
+          fi
+
       # --------------------------------------------------------
       # Install .NET 6 SDK
       # --------------------------------------------------------
@@ -135,8 +145,16 @@ jobs:
       # --------------------------------------------------------
       - name: Build eLibrary
         if: | 
-          needs.detect-changes.outputs.elibrary == 'true' ||
-          ( github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true )
+          ( 
+            github.event_name != 'workflow_dispatch' &&
+            needs.detect-changes.outputs.elibrary == 'true'
+          )
+          ||
+          (
+            github.event_name == 'workflow_dispatch' &&
+            inputs.deploy_elibrary == true
+          )
+           
         run: |
           dotnet build eLibrary/eLibrary.csproj \
           --configuration ${{ env.CONFIGURATION }} \
@@ -144,8 +162,15 @@ jobs:
 
       - name: Publish eLibrary
         if: | 
-          needs.detect-changes.outputs.elibrary == 'true' || 
-          ( github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true )
+          (
+            github.event_name != 'workflow_dispatch' &&
+            needs.detect-changes.outputs.elibrary == 'true'
+          ) 
+          ||
+          (
+            github.event_name == 'workflow_dispatch' &&
+            inputs.deploy_elibrary == true
+          )
         run: |
           dotnet publish eLibrary/eLibrary.csproj \
           --configuration ${{ env.CONFIGURATION }} \
@@ -157,8 +182,14 @@ jobs:
       # =======================================================
       - name: Build UserManagement
         if: |
-          needs.detect-changes.outputs.usermanagement == 'true' ||
-          ( github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true )
+          (
+            github.event_name != 'workflow_dispatch' &&
+            needs.detect-changes.outputs.usermanagement == 'true'
+          ) ||
+          (
+            github.event_name == 'workflow_dispatch' &&
+            inputs.deploy_usermanagement == true
+          )
         run: |
           dotnet build UserManagement/UserManagement.csproj \
             --configuration Release \
@@ -166,8 +197,14 @@ jobs:
             
       - name: Publish UserManagement
         if: | 
-          needs.detect-changes.outputs.usermanagement == 'true' || 
-          ( github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true )
+         (
+            github.event_name != 'workflow_dispatch' &&
+            needs.detect-changes.outputs.usermanagement == 'true'
+          ) ||
+          (
+            github.event_name == 'workflow_dispatch' &&
+            inputs.deploy_usermanagement == true
+          )
         run: |
           dotnet publish UserManagement/UserManagement.csproj \
           --configuration ${{ env.CONFIGURATION }} \
