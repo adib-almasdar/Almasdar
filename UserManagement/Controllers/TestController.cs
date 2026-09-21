@@ -28,7 +28,9 @@ namespace UserManagement.Controllers
         {
             return Ok(new
             {
-                Name = "Vineet Kumar"
+                Name = "Vineet Kumar",
+                EmailId = "Vineet.kumar@abc.com",
+                PhoneNo = "1234567890",
             });
         }
     }
