@@ -23,5 +23,13 @@ namespace UserManagement.Controllers
             var env = configuration["Environment"];
             return Ok(configuration["Environment"]);
         }
+        [HttpGet("GetUserDetails")]
+        public IActionResult GetUserDetails()
+        {
+            return Ok(new
+            {
+                Name = "Vineet Kumar"
+            });
+        }
     }
 }
