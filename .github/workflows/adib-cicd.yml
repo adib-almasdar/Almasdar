@@ -21,7 +21,7 @@ on:
         required: true
         type: choice
         options:
-          - DEV
+          - Dev
           - UAT
           - main
 
@@ -136,7 +136,7 @@ jobs:
       - name: Build eLibrary
         if: | 
           needs.detect-changes.outputs.elibrary == 'true' ||
-          inputs.deploy_elibrary == true
+          ( github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true )
         run: |
           dotnet build eLibrary/eLibrary.csproj \
           --configuration ${{ env.CONFIGURATION }} \
@@ -145,7 +145,7 @@ jobs:
       - name: Publish eLibrary
         if: | 
           needs.detect-changes.outputs.elibrary == 'true' || 
-          inputs.deploy_elibrary == true
+          ( github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true )
         run: |
           dotnet publish eLibrary/eLibrary.csproj \
           --configuration ${{ env.CONFIGURATION }} \
@@ -158,7 +158,7 @@ jobs:
       - name: Build UserManagement
         if: |
           needs.detect-changes.outputs.usermanagement == 'true' ||
-          inputs.deploy_usermanagement == true
+          ( github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true )
         run: |
           dotnet build UserManagement/UserManagement.csproj \
             --configuration Release \
@@ -167,7 +167,7 @@ jobs:
       - name: Publish UserManagement
         if: | 
           needs.detect-changes.outputs.usermanagement == 'true' || 
-          inputs.deploy_usermanagement == true
+          ( github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true )
         run: |
           dotnet publish UserManagement/UserManagement.csproj \
           --configuration ${{ env.CONFIGURATION }} \
@@ -248,7 +248,7 @@ jobs:
         - name: Deploy eLibrary
           if: |
             needs.detect-changes.outputs.elibrary == 'true' ||
-            inputs.deploy_elibrary == true
+            ( github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true )
           uses: azure/webapps-deploy@v3
           with:
             app-name: ${{ vars.ELIBRARY_APP_NAME }}
@@ -260,7 +260,7 @@ jobs:
         - name: Deploy UserManagement
           if: |
             needs.detect-changes.outputs.usermanagement == 'true' || 
-            inputs.deploy_usermanagement == true
+            ( github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true )
           uses: azure/webapps-deploy@v3
           with:
             app-name: ${{ vars.USERMANAGEMENT_APP_NAME }}
