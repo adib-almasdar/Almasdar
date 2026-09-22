@@ -195,7 +195,7 @@ jobs:
       # eLibrary BUILD
       # --------------------------------------------------------
       - name: Build eLibrary
-        if: |
+        if: >
           needs.detect-changes.outputs.elibrary == 'true'
           ||
           (
@@ -213,7 +213,7 @@ jobs:
       # eLibrary PUBLISH
       # ========================================================
       - name: Publish eLibrary
-        if: |
+        if: >
           (
             github.event_name == 'push'
             &&
@@ -236,7 +236,7 @@ jobs:
       # UserManagement BUILD
       # =======================================================
       - name: Build UserManagement
-        if: |
+        if: >
           needs.detect-changes.outputs.usermanagement == 'true'
           ||
           (
@@ -254,7 +254,7 @@ jobs:
       # UserManagement PUBLISH
       # ========================================================
       - name: Publish UserManagement
-        if: |
+        if: >
           (
             github.event_name == 'push'
             &&
@@ -277,7 +277,7 @@ jobs:
       # Verify packages
       # --------------------------------------------------------
       - name: Verify Deployment Packages
-        if: |
+        if: >
           github.event_name == 'push'
           ||
           github.event_name == 'workflow_dispatch'
@@ -303,10 +303,11 @@ jobs:
       # Upload ARTIFACT
       # --------------------------------------------------------
       - name: Upload Deployment Artifact
-        if: |
-          github.event_name == 'push'
-          ||
-          github.event_name == 'workflow_dispatch'
+        if: >
+          (github.event_name == 'push' &&
+          (needs.detect-changes.outputs.elibrary == 'true' || needs.detect-changes.outputs.usermanagement == 'true'))
+          || (github.event_name == 'workflow_dispatch' &&
+          (inputs.deploy_elibrary == true || inputs.deploy_usermanagement == true))
           
         uses: actions/upload-artifact@v4
         with:
@@ -322,16 +323,13 @@ jobs:
   deploy-dev:
     name: Deploy to DEV
     
-    if: |
-      ( 
-        github.event_name == 'push' &&
-        github.ref == 'refs/heads/Dev'
-      )
-      ||
-      (
-        github.event_name == 'workflow_dispatch' &&
-        inputs.environment == 'Dev'
-      )
+    if: >
+      (github.event_name == 'push' &&
+      github.ref == 'refs/heads/Dev' &&
+      (needs.detect-changes.outputs.elibrary == 'true' || needs.detect-changes.outputs.usermanagement == 'true'))
+      || (github.event_name == 'workflow_dispatch' &&
+      inputs.environment == 'DEV' &&
+      (inputs.deploy_elibrary == true || inputs.deploy_usermanagement == true))
     needs: 
       - detect-changes
       - build
@@ -389,16 +387,13 @@ jobs:
    deploy-uat:
     name: Deploy to UAT
     
-    if: |
-      ( 
-        github.event_name == 'push' &&
-        github.ref == 'refs/heads/Dev'
-      )
-      ||
-      (
-        github.event_name == 'workflow_dispatch' &&
-        inputs.environment == 'UAT'
-      )
+    if: >
+      (github.event_name == 'push' &&
+      github.ref == 'refs/heads/UAT' &&
+      (needs.detect-changes.outputs.elibrary == 'true' || needs.detect-changes.outputs.usermanagement == 'true'))
+      || (github.event_name == 'workflow_dispatch' &&
+      inputs.environment == 'UAT' &&
+      (inputs.deploy_elibrary == true || inputs.deploy_usermanagement == true))
     needs: 
       - detect-changes
       - build
@@ -456,16 +451,13 @@ jobs:
   deploy-prod:
     name: Deploy to PROD
     
-    if: |
-      ( 
-        github.event_name == 'push' &&
-        github.ref == 'refs/heads/Dev'
-      )
-      ||
-      (
-        github.event_name == 'workflow_dispatch' &&
-        inputs.environment == 'PROD'
-      )
+    if:  >
+      (github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      (needs.detect-changes.outputs.elibrary == 'true' || needs.detect-changes.outputs.usermanagement == 'true'))
+      || (github.event_name == 'workflow_dispatch' &&
+      inputs.environment == 'PROD' &&
+      (inputs.deploy_elibrary == true || inputs.deploy_usermanagement == true))
     needs: 
       - detect-changes
       - build
