@@ -63,12 +63,10 @@ env:
   CONFIGURATION: Release
 
 # ============================================================
-# JOBS
+# 1. DETECT CHANGED MODULES
 # ============================================================
 jobs:
-  # ============================================================
-  # 1. DETECT CHANGED MODULES
-  # ============================================================
+  
   detect-changes:
     name: Detect Changed Modules
     runs-on: ubuntu-latest
