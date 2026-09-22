@@ -1,18 +1,28 @@
 name: Almasdar Ci-CD
 
 on: 
+
+  # ============================================================
+  # AUTOMATIC DEPLOYMENT
+  # ============================================================
   push:
     branches:
       - Dev
       - UAT
       - main
 
+  # ============================================================
+  # PR VALIDATION
+  # ============================================================
   pull_request:
     branches:
       - Dev
       - UAT
       - main
 
+  # ============================================================
+  # MANUAL DEPLOYMENT
+  # ============================================================
   workflow_dispatch:
     inputs:
 
@@ -21,7 +31,7 @@ on:
         required: true
         type: choice
         options:
-          - Dev
+          - DEV
           - UAT
           - PROD
 
@@ -42,17 +52,21 @@ on:
 # ============================================================
 permissions: 
   contents: read
+  pull-requests: read
   id-token: write
 
+# ============================================================
+# GLOBAL VARIABLES
+# ============================================================
 env:
-  DOTNET_Version: '6.0.x'
-  COFIGURATION: Release
+  DOTNET_VERSION: '6.0.x'
+  CONFIGURATION: Release
 
 # ============================================================
 # 1. DETECT CHANGED MODULES
 # ============================================================
 jobs:
-
+  
   detect-changes:
     name: Detect Changed Modules
     runs-on: ubuntu-latest
@@ -62,11 +76,18 @@ jobs:
       usermanagement: ${{ steps.filter.outputs.usermanagement }}
 
     steps:
+
+      # --------------------------------------------------------
+      # Checkout
+      # --------------------------------------------------------
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # --------------------------------------------------------
+      # Detect changes
+      # --------------------------------------------------------
       - name: Detect Changed Modules
         id: filter
         uses: dorny/paths-filter@v3
@@ -92,7 +113,7 @@ jobs:
               - 'Common/UserManagement/**'
 
   # ===================================
-  # BUILD
+  # BUILD AND PUBLISH
   # ===================================
   build:
     name: Build and Publish APIs
@@ -102,13 +123,13 @@ jobs:
     steps:
 
       # ----------------------------------
-      # Checkout source code
+      # Checkout
       # ----------------------------------
       - name: Checkout source code
         uses: actions/checkout@v4
 
       # -----------------------------------
-      # Validate selected modules
+      # Validate manual selection
       # -----------------------------------
       - name: Validate selected modules
         if: github.event_name == 'workflow_dispatch'
@@ -121,15 +142,19 @@ jobs:
           fi
 
       # -----------------------------------
-      # Validate branch and environment
+      # Validate manual branch and environment
       # -----------------------------------
-      - name: Validate branch and environment
+      - name: Validate Branch and Environment
+        if: github.event_name == 'workflow_disptach'
         shell: bash
         run: |
           branch="${GITHUB_REF_NAME}"
           environment="${{ inputs.environment }}"
 
-          if [[ "$environment" == "Dev" && "$branch" != "Dev" ]]; then
+          echo "Branch      : $branch"
+          echo "Environment : $environment"
+
+          if [[ "$environment" == "DEV" && "$branch" != "Dev" ]]; then
             echo "DEV deployments must use the Dev branch."
             exit 1
           fi
@@ -168,59 +193,122 @@ jobs:
         run: dotnet restore ADIBSolution.sln
 
       # --------------------------------------------------------
-      # eLibrary
+      # eLibrary BUILD
       # --------------------------------------------------------
       - name: Build eLibrary
-        if: github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true
-           
+        if: |
+          needs.detect-changes.outputs.elibrary == 'true'
+          ||
+          (
+            github.event_name == 'workflow_dispatch'
+            &&
+            inputs.deploy_elibrary == true
+          )
+          
         run: |
           dotnet build eLibrary/eLibrary.csproj \
           --configuration ${{ env.CONFIGURATION }} \
           --no-restore
 
+      # ========================================================
+      # eLibrary PUBLISH
+      # ========================================================
       - name: Publish eLibrary
-        if: github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true
-        run: |
+        if: |
+          (
+            github.event_name == 'push'
+            &&
+            needs.detect-changes.outputs.elibrary == 'true'
+          )
+          ||
+          (
+            github.event_name == 'workflow_dispatch'
+            &&
+            inputs.deploy_elibrary == true
+          )
+          
+          run: |
           dotnet publish eLibrary/eLibrary.csproj \
           --configuration ${{ env.CONFIGURATION }} \
           --no-build \
           --output ./publish/eLibrary
           
       # ========================================================
-      # UserManagement
+      # UserManagement BUILD
       # =======================================================
       - name: Build UserManagement
-        if: github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true
-        run: |
+        if: |
+          needs.detect-changes.outputs.usermanagement == 'true'
+          ||
+          (
+            github.event_name == 'workflow_dispatch'
+            &&
+            inputs.deploy_usermanagement == true
+          )
+          
+          run: |
           dotnet build UserManagement/UserManagement.csproj \
             --configuration Release \
             --no-restore
-            
+
+      # ========================================================
+      # UserManagement PUBLISH
+      # ========================================================
       - name: Publish UserManagement
-        if: github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true
-        run: |
+        if: |
+          (
+            github.event_name == 'push'
+            &&
+            needs.detect-changes.outputs.usermanagement == 'true'
+          )
+          ||
+          (
+            github.event_name == 'workflow_dispatch'
+            &&
+            inputs.deploy_usermanagement == true
+          )
+          
+          run: |
           dotnet publish UserManagement/UserManagement.csproj \
           --configuration ${{ env.CONFIGURATION }} \
           --no-build \
           --output ./publish/UserManagement
 
       # --------------------------------------------------------
-      # Verify deployment packages
+      # Verify packages
       # --------------------------------------------------------
-      - name: Verify deployment packages
+      - name: Verify Deployment Packages
+        if: |
+          github.event_name == 'push'
+          ||
+          github.event_name == 'workflow_dispatch'
+        shell: bash
         run: |
-          echo "Published packages:"
+          
+          echo "========================================="
+          echo "Published Packages"
+          echo "========================================="
+          
+          if [ ! -d "./publish" ]; then
+            echo "ERROR: ./publish directory does not exist."
+            exit 1
+          fi
+          
           find ./publish -maxdepth 2 -type f | head -50
-
-          if [ ! -d "./publish" ] || [ -z "$(find ./publish -type f -print -quit)" ]; then
+          if [ -z "$(find ./publish -type f -print -quit)" ]; then
             echo "ERROR: No deployment packages were generated."
             exit 1
           fi
 
       # --------------------------------------------------------
-      # Upload Changed Packages
+      # Upload ARTIFACT
       # --------------------------------------------------------
-      - name: Upload deployment artifact
+      - name: Upload Deployment Artifact
+        if: |
+          github.event_name == 'push'
+          ||
+          github.event_name == 'workflow_dispatch'
+          
         uses: actions/upload-artifact@v4
         with:
           name: adib-api-packages
@@ -243,7 +331,7 @@ jobs:
       ||
       (
         github.event_name == 'workflow_dispatch' &&
-        inputs.environment == 'DEV'
+        inputs.environment == 'Dev'
       )
     needs: 
       - detect-changes
@@ -252,8 +340,75 @@ jobs:
     runs-on: ubuntu-latest
     
     environment:
-        name: ${{ inputs.environment || (github.ref_name == 'Dev' && 'Dev') || (github.ref_name == 'UAT' && 'UAT') || (github.ref_name == 'main' && 'PROD') }}
+        name: DEV
     
+    steps:
+    
+        # --------------------------------------------------------
+        # Download artifact
+        # --------------------------------------------------------
+        - name: Download Deployment Artifact
+          uses: actions/download-artifact@v4
+          with:
+            name: adib-api-packages
+            path: ./publish
+
+        # --------------------------------------------------------
+        # Azure OIDC Login
+        # --------------------------------------------------------
+        - name: Azure Login
+          uses: azure/login@v2
+          with:
+            client-id: ${{ secrets.AZURE_CLIENT_ID }}
+            tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+            subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+        # --------------------------------------------------------
+        # eLibrary
+        # --------------------------------------------------------
+        - name: Deploy eLibrary
+          if: needs.detect-changes.outputs.elibrary == 'true' || ( github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true )
+          uses: azure/webapps-deploy@v3
+          with:
+            app-name: ${{ vars.ELIBRARY_APP_NAME }}
+            package: ./publish/eLibrary
+
+        # --------------------------------------------------------
+        # UserManagement
+        # --------------------------------------------------------
+        - name: Deploy UserManagement
+          if: needs.detect-changes.outputs.usermanagement == 'true' || ( github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true )
+          uses: azure/webapps-deploy@v3
+          with:
+            app-name: ${{ vars.USERMANAGEMENT_APP_NAME }}
+            package: ./publish/UserManagement
+            
+  # ============================================================
+  # UAT DEPLOYMENT
+  # Branch: UAT 
+  # ============================================================
+   deploy-uat:
+    name: Deploy to UAT
+    
+    if: |
+      ( 
+        github.event_name == 'push' &&
+        github.ref == 'refs/heads/Dev'
+      )
+      ||
+      (
+        github.event_name == 'workflow_dispatch' &&
+        inputs.environment == 'UAT'
+      )
+    needs: 
+      - detect-changes
+      - build
+    
+    runs-on: ubuntu-latest
+    
+    environment:
+        name: UAT
+        
     steps:
     
         # --------------------------------------------------------
@@ -279,7 +434,7 @@ jobs:
         # eLibrary
         # --------------------------------------------------------
         - name: Deploy eLibrary
-          if: inputs.deploy_elibrary == true
+          if: needs.detect-changes.outputs.elibrary == 'true' || ( github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true )
           uses: azure/webapps-deploy@v3
           with:
             app-name: ${{ vars.ELIBRARY_APP_NAME }}
@@ -289,15 +444,78 @@ jobs:
         # UserManagement
         # --------------------------------------------------------
         - name: Deploy UserManagement
-          if: inputs.deploy_usermanagement == true
+          if: needs.detect-changes.outputs.usermanagement == 'true' || ( github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true )
           uses: azure/webapps-deploy@v3
           with:
             app-name: ${{ vars.USERMANAGEMENT_APP_NAME }}
             package: ./publish/UserManagement
-
- 
+            
+  # ============================================================
+  # PROD DEPLOYMENT
+  # Branch: main 
+  # ============================================================  
+  deploy-prod:
+    name: Deploy to PROD
     
+    if: |
+      ( 
+        github.event_name == 'push' &&
+        github.ref == 'refs/heads/Dev'
+      )
+      ||
+      (
+        github.event_name == 'workflow_dispatch' &&
+        inputs.environment == 'PROD'
+      )
+    needs: 
+      - detect-changes
+      - build
+    
+    runs-on: ubuntu-latest
+    
+    environment:
+        name: PROD
+        
+    steps:
+    
+        # --------------------------------------------------------
+        # Download artifact
+        # --------------------------------------------------------
+        - name: Download deployment artifact
+          uses: actions/download-artifact@v4
+          with:
+            name: adib-api-packages
+            path: ./publish
 
+        # --------------------------------------------------------
+        # Azure OIDC Login
+        # --------------------------------------------------------
+        - name: Azure Login
+          uses: azure/login@v2
+          with:
+            client-id: ${{ secrets.AZURE_CLIENT_ID }}
+            tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+            subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+        # --------------------------------------------------------
+        # eLibrary
+        # --------------------------------------------------------
+        - name: Deploy eLibrary
+          if: needs.detect-changes.outputs.elibrary == 'true' || ( github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true )
+          uses: azure/webapps-deploy@v3
+          with:
+            app-name: ${{ vars.ELIBRARY_APP_NAME }}
+            package: ./publish/eLibrary
+
+        # --------------------------------------------------------
+        # UserManagement
+        # --------------------------------------------------------
+        - name: Deploy UserManagement
+          if: needs.detect-changes.outputs.usermanagement == 'true' || ( github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true )
+          uses: azure/webapps-deploy@v3
+          with:
+            app-name: ${{ vars.USERMANAGEMENT_APP_NAME }}
+            package: ./publish/UserManagement
 
 
 
