@@ -31,8 +31,6 @@ namespace UserManagement.Controllers
                 Name = "Vineet Kumar",
                 EmailId = "Vineet.kumar@abc.com",
                 PhoneNo = "1234567890",
-                Country = "India",
-                City = "Hyderabad",
             });
         }
     }
