@@ -214,23 +214,13 @@ jobs:
       # ========================================================
       - name: Publish eLibrary
         if: >
-          (
-            github.event_name == 'push'
-            &&
-            needs.detect-changes.outputs.elibrary == 'true'
-          )
-          ||
-          (
-            github.event_name == 'workflow_dispatch'
-            &&
-            inputs.deploy_elibrary == true
-          )
-          
-          run: |
+          (github.event_name == 'push' && needs.detect-changes.outputs.elibrary == 'true')
+          || (github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true)
+        run: |
           dotnet publish eLibrary/eLibrary.csproj \
-          --configuration ${{ env.CONFIGURATION }} \
-          --no-build \
-          --output ./publish/eLibrary
+            --configuration ${{ env.CONFIGURATION }} \
+            --no-build \
+            --output ./publish/eLibrary
           
       # ========================================================
       # UserManagement BUILD
@@ -238,16 +228,10 @@ jobs:
       - name: Build UserManagement
         if: >
           needs.detect-changes.outputs.usermanagement == 'true'
-          ||
-          (
-            github.event_name == 'workflow_dispatch'
-            &&
-            inputs.deploy_usermanagement == true
-          )
-          
-          run: |
+          || (github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true)
+        run: |
           dotnet build UserManagement/UserManagement.csproj \
-            --configuration Release \
+            --configuration ${{ env.CONFIGURATION }} \
             --no-restore
 
       # ========================================================
@@ -255,23 +239,13 @@ jobs:
       # ========================================================
       - name: Publish UserManagement
         if: >
-          (
-            github.event_name == 'push'
-            &&
-            needs.detect-changes.outputs.usermanagement == 'true'
-          )
-          ||
-          (
-            github.event_name == 'workflow_dispatch'
-            &&
-            inputs.deploy_usermanagement == true
-          )
-          
-          run: |
+          (github.event_name == 'push' && needs.detect-changes.outputs.usermanagement == 'true')
+          || (github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true)
+        run: |
           dotnet publish UserManagement/UserManagement.csproj \
-          --configuration ${{ env.CONFIGURATION }} \
-          --no-build \
-          --output ./publish/UserManagement
+            --configuration ${{ env.CONFIGURATION }} \
+            --no-build \
+            --output ./publish/UserManagement
 
       # --------------------------------------------------------
       # Verify packages
@@ -384,7 +358,7 @@ jobs:
   # UAT DEPLOYMENT
   # Branch: UAT 
   # ============================================================
-   deploy-uat:
+  deploy-uat:
     name: Deploy to UAT
     
     if: >
