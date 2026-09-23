@@ -24,17 +24,14 @@ on:
           - UAT
           - PROD
 
-      deploy_elibrary:
-        description: "Deploy eLibrary"
+      deploy_module:
+        description: "Select module to deploy"
         required: true
-        type: boolean
-        default: false
-
-      deploy_usermanagement:
-        description: "Deploy UserManagement"
-        required: true
-        type: boolean
-        default: false
+        type: choice
+        options:
+          - eLibrary
+          - UserManagement
+          - All
 
 permissions:
   contents: read
@@ -73,16 +70,10 @@ jobs:
               - 'Common/UserManagement/**'
 
   build:
-    name: Build ${{matrix.module}}
+    name: Build and Publish APIs
     needs: detect-changes
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        include:
-          - module: eLibrary
-          - module: UserManagement
-          
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -91,8 +82,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
-          if [[ "${{ inputs.deploy_elibrary }}" != "true" && "${{ inputs.deploy_usermanagement }}" != "true" ]]; then
-            echo "ERROR: Select at least one module to deploy."
+          if [[ -z "${{ inputs.deploy_module }}" || "${{ inputs.deploy_module }}" == "null" ]]; then
+            echo "ERROR: Select a module to deploy."
             exit 1
           fi
 
@@ -132,104 +123,73 @@ jobs:
       - name: Restore projects
         run: dotnet restore ADIBSolution.sln
 
-      - name: Build ${{ matrix.module }}
-        if: >-
-          ${{
-            (matrix.module == 'eLibrary' &&
-             needs.detect-changes.outputs.elibrary == 'true')
-            ||
-            (matrix.module == 'UserManagement' &&
-             needs.detect-changes.outputs.usermanagement == 'true')
-            ||
-            (github.event_name == 'workflow_dispatch' &&
-             (
-               (matrix.module == 'eLibrary' &&
-                inputs.deploy_elibrary == true)
-               ||
-               (matrix.module == 'UserManagement' &&
-                inputs.deploy_usermanagement == true)
-             ))
-          }}
+      - name: Build eLibrary
+        if: >
+          needs.detect-changes.outputs.elibrary == 'true'
+          || (github.event_name == 'workflow_dispatch' && ( inputs.deploy_module == 'eLibrary' || inputs.deploy_module == 'All' ))
         run: |
-          if [ "${{ matrix.module }}" = "eLibrary" ]; then
           dotnet build eLibrary/eLibrary.csproj \
-            --configuration "${{ env.CONFIGURATION }}" \
+            --configuration ${{ env.CONFIGURATION }} \
             --no-restore
-          else
-            dotnet build UserManagement/UserManagement.csproj \
-              --configuration "${{ env.CONFIGURATION }}" \
-              --no-restore
-          fi
 
-      - name: Publish ${{ matrix.module }}
-        if: >-
-          ${{
-            (github.event_name == 'push' &&
-             (
-               (matrix.module == 'eLibrary' &&
-                needs.detect-changes.outputs.elibrary == 'true')
-               ||
-               (matrix.module == 'UserManagement' &&
-                needs.detect-changes.outputs.usermanagement == 'true')
-             ))
-            ||
-            (github.event_name == 'workflow_dispatch' &&
-             (
-               (matrix.module == 'eLibrary' &&
-                inputs.deploy_elibrary == true)
-               ||
-               (matrix.module == 'UserManagement' &&
-                inputs.deploy_usermanagement == true)
-             ))
-          }}
+      - name: Publish eLibrary
+        if: >
+          (github.event_name == 'push' && needs.detect-changes.outputs.elibrary == 'true')
+          || (github.event_name == 'workflow_dispatch' && ( inputs.deploy_module == 'eLibrary' || inputs.deploy_module == 'All' ))
         run: |
-          dotnet publish ${{ matrix.module }}/${{ matrix.module }}.csproj \
+          dotnet publish eLibrary/eLibrary.csproj \
             --configuration ${{ env.CONFIGURATION }} \
             --no-build \
-            --output ./publish/${{ matrix.module }}
+            --output ./publish/eLibrary
 
-      - name: Verify Deployment Packages for ${{ matrix.module }}
-        if: ${{ (github.event_name == 'push' && matrix.module == 'eLibrary' && needs.detect-changes.outputs.elibrary == 'true') || (github.event_name == 'push' && matrix.module == 'UserManagement' && needs.detect-changes.outputs.usermanagement == 'true') || (github.event_name == 'workflow_dispatch' && ((matrix.module == 'eLibrary' && inputs.deploy_elibrary == true) || (matrix.module == 'UserManagement' && inputs.deploy_usermanagement == true))) }}
+      - name: Build UserManagement
+        if: >
+          needs.detect-changes.outputs.usermanagement == 'true'
+          || (github.event_name == 'workflow_dispatch' && ( inputs.deploy_module == 'UserManagement' || inputs.deploy_module == 'All' ))
+        run: |
+          dotnet build UserManagement/UserManagement.csproj \
+            --configuration ${{ env.CONFIGURATION }} \
+            --no-restore
+
+      - name: Publish UserManagement
+        if: >
+          (github.event_name == 'push' && needs.detect-changes.outputs.usermanagement == 'true')
+          || (github.event_name == 'workflow_dispatch' && ( inputs.deploy_module == 'UserManagement' || inputs.deploy_module == 'All' ))
+        run: |
+          dotnet publish UserManagement/UserManagement.csproj \
+            --configuration ${{ env.CONFIGURATION }} \
+            --no-build \
+            --output ./publish/UserManagement
+
+      - name: Verify Deployment Packages
+        if: >
+          (github.event_name == 'push' &&
+          (needs.detect-changes.outputs.elibrary == 'true' || needs.detect-changes.outputs.usermanagement == 'true'))
+          || (github.event_name == 'workflow_dispatch' &&
+          (inputs.deploy_module == 'eLibrary' || inputs.deploy_module == 'UserManagement' || inputs.deploy_module == 'All'))
         shell: bash
         run: |
           echo "========================================="
-          echo "Published Packages: ${{ matrix.module }}"
+          echo "Published Packages"
           echo "========================================="
 
-          PACKAGE_PATH="./publish/${{ matrix.module }}"
-
-          if [ ! -d "$PACKAGE_PATH" ]; then
-            echo "ERROR: $PACKAGE_PATH directory does not exist."
+          if [ ! -d "./publish" ]; then
+            echo "ERROR: ./publish directory does not exist."
             exit 1
           fi
 
-          find $PACKAGE_PATH -maxdepth 2 -type f -print | sed -n '1,50p'
-          if [ -z "$(find $PACKAGE_PATH -type f -print -quit)" ]; then
-            echo "ERROR: No deployment packages were generated for ${{ matrix.module }}.."
+          find ./publish -maxdepth 2 -type f | head -50
+          if [ -z "$(find ./publish -type f -print -quit)" ]; then
+            echo "ERROR: No deployment packages were generated."
             exit 1
           fi
 
-      - name: Upload ${{ matrix.module }} artifact
-        if: >-
-          ${{
-            (github.event_name == 'push' &&
-             (
-               (matrix.module == 'eLibrary' &&
-                needs.detect-changes.outputs.elibrary == 'true')
-               ||
-               (matrix.module == 'UserManagement' &&
-                needs.detect-changes.outputs.usermanagement == 'true')
-             ))
-            ||
-            (github.event_name == 'workflow_dispatch' &&
-             (
-               (matrix.module == 'eLibrary' &&
-                inputs.deploy_elibrary == true)
-               ||
-               (matrix.module == 'UserManagement' &&
-                inputs.deploy_usermanagement == true)
-             ))
-          }}
+      - name: Upload Deployment Artifact
+        if: >
+          (github.event_name == 'push' &&
+          (needs.detect-changes.outputs.elibrary == 'true' || needs.detect-changes.outputs.usermanagement == 'true'))
+          || (github.event_name == 'workflow_dispatch' &&
+          (inputs.deploy_module == 'eLibrary' || inputs.deploy_module == 'UserManagement' || inputs.deploy_module == 'All'))
         uses: actions/upload-artifact@v4
         with:
           name: adib-api-packages
@@ -246,7 +206,7 @@ jobs:
       (needs.detect-changes.outputs.elibrary == 'true' || needs.detect-changes.outputs.usermanagement == 'true'))
       || (github.event_name == 'workflow_dispatch' &&
       inputs.environment == 'DEV' &&
-      (inputs.deploy_elibrary == true || inputs.deploy_usermanagement == true))
+      (inputs.deploy_module == 'eLibrary' || inputs.deploy_module == 'UserManagement' || inputs.deploy_module == 'All'))
     needs:
       - detect-changes
       - build
@@ -273,7 +233,8 @@ jobs:
       - name: Deploy eLibrary
         if: >
           needs.detect-changes.outputs.elibrary == 'true'
-          || (github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true)
+          || (github.event_name == 'workflow_dispatch'
+              && (inputs.deploy_module == 'eLibrary' || inputs.deploy_module == 'All'))
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ vars.ELIBRARY_APP_NAME }}
@@ -282,7 +243,8 @@ jobs:
       - name: Deploy UserManagement
         if: >
           needs.detect-changes.outputs.usermanagement == 'true'
-          || (github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true)
+          || (github.event_name == 'workflow_dispatch'
+              && (inputs.deploy_module == 'UserManagement' || inputs.deploy_module == 'All'))
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ vars.USERMANAGEMENT_APP_NAME }}
@@ -297,7 +259,7 @@ jobs:
       (needs.detect-changes.outputs.elibrary == 'true' || needs.detect-changes.outputs.usermanagement == 'true'))
       || (github.event_name == 'workflow_dispatch' &&
       inputs.environment == 'UAT' &&
-      (inputs.deploy_elibrary == true || inputs.deploy_usermanagement == true))
+      (inputs.deploy_module == 'eLibrary' || inputs.deploy_module == 'UserManagement' || inputs.deploy_module == 'All'))
     needs:
       - detect-changes
       - build
@@ -324,7 +286,8 @@ jobs:
       - name: Deploy eLibrary
         if: >
           needs.detect-changes.outputs.elibrary == 'true'
-          || (github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true)
+          || (github.event_name == 'workflow_dispatch'
+              && (inputs.deploy_module == 'eLibrary' || inputs.deploy_module == 'All'))
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ vars.ELIBRARY_APP_NAME }}
@@ -333,7 +296,8 @@ jobs:
       - name: Deploy UserManagement
         if: >
           needs.detect-changes.outputs.usermanagement == 'true'
-          || (github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true)
+          || (github.event_name == 'workflow_dispatch'
+              && (inputs.deploy_module == 'UserManagement' || inputs.deploy_module == 'All'))
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ vars.USERMANAGEMENT_APP_NAME }}
@@ -348,7 +312,7 @@ jobs:
       (needs.detect-changes.outputs.elibrary == 'true' || needs.detect-changes.outputs.usermanagement == 'true'))
       || (github.event_name == 'workflow_dispatch' &&
       inputs.environment == 'PROD' &&
-      (inputs.deploy_elibrary == true || inputs.deploy_usermanagement == true))
+      (inputs.deploy_module == 'eLibrary' || inputs.deploy_module == 'UserManagement' || inputs.deploy_module == 'All'))
     needs:
       - detect-changes
       - build
@@ -375,7 +339,8 @@ jobs:
       - name: Deploy eLibrary
         if: >
           needs.detect-changes.outputs.elibrary == 'true'
-          || (github.event_name == 'workflow_dispatch' && inputs.deploy_elibrary == true)
+          || (github.event_name == 'workflow_dispatch'
+              && (inputs.deploy_module == 'eLibrary' || inputs.deploy_module == 'All'))
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ vars.ELIBRARY_APP_NAME }}
@@ -384,7 +349,8 @@ jobs:
       - name: Deploy UserManagement
         if: >
           needs.detect-changes.outputs.usermanagement == 'true'
-          || (github.event_name == 'workflow_dispatch' && inputs.deploy_usermanagement == true)
+          || (github.event_name == 'workflow_dispatch'
+              && (inputs.deploy_module == 'UserManagement' || inputs.deploy_module == 'All'))
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ vars.USERMANAGEMENT_APP_NAME }}
