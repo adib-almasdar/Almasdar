@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using CommonLib.Data;
+using Microsoft.AspNetCore.Mvc;
 
 // For more information on enabling Web API for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
 
@@ -31,6 +32,8 @@ namespace UserManagement.Controllers
                 Name = "Vineet Kumar",
                 EmailId = "Vineet.kumar@abc.com",
                 PhoneNo = "1234567890",
+                Country = "India",
+                City = "Hyderabad"
             });
         }
     }
