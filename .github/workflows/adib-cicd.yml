@@ -183,10 +183,10 @@ jobs:
              ))
           }}
         run: |
-          dotnet publish eLibrary/eLibrary.csproj \
+          dotnet publish ${{ matrix.module }}/${{ matrix.module }}.csproj \
             --configuration ${{ env.CONFIGURATION }} \
             --no-build \
-            --output ./publish/eLibrary
+            --output ./publish/${{ matrix.module }}
 
       - name: Verify Deployment Packages for ${{ matrix.module }}
         if: ${{ (github.event_name == 'push' && matrix.module == 'eLibrary' && needs.detect-changes.outputs.elibrary == 'true') || (github.event_name == 'push' && matrix.module == 'UserManagement' && needs.detect-changes.outputs.usermanagement == 'true') || (github.event_name == 'workflow_dispatch' && ((matrix.module == 'eLibrary' && inputs.deploy_elibrary == true) || (matrix.module == 'UserManagement' && inputs.deploy_usermanagement == true))) }}
