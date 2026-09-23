@@ -178,7 +178,7 @@ jobs:
             exit 1
           fi
 
-          find ./publish -maxdepth 2 -type f | head -50
+          find ./publish -maxdepth 2 -type f -print | sed -n '1,50p'
           if [ -z "$(find ./publish -type f -print -quit)" ]; then
             echo "ERROR: No deployment packages were generated."
             exit 1
