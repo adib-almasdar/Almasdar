@@ -1,0 +1,301 @@
+name: UserManagement CI-CD
+
+on:
+  # ============================================================
+  # AUTOMATIC DEPLOYMENT
+  # ============================================================
+  push:
+    branches:
+      - Dev
+      - UAT
+      - main
+
+    paths:
+      - 'UserManagement/**'
+
+
+  # ============================================================
+  # PR VALIDATION
+  # ============================================================
+  pull_request:
+    branches:
+      - Dev
+      - UAT
+      - main
+
+    paths:
+      - 'UserManagement/**'
+      
+  # ============================================================
+  # MANUAL DEPLOYMENT
+  # ============================================================
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select environment"
+        required: true
+        type: choice
+        options:
+          - DEV
+          - UAT
+          - PROD
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  DOTNET_VERSION: "6.0.x"
+  CONFIGURATION: Release
+  PROJECT_PATH: UserManagement/UserManagement.csproj
+
+jobs:
+
+  # ============================================================
+  # BUILD
+  # ============================================================
+  build:
+    name: Build userManagement
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      # ========================================================
+      # VALIDATE BRANCH AND ENVIRONMENT 
+      # ========================================================
+      - name: Validate Branch and Environment
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          branch="${GITHUB_REF_NAME}"
+          environment="${{ inputs.environment }}"
+
+          echo "Branch      : $branch"
+          echo "Environment : $environment"
+
+          if [[ "$environment" == "DEV" && "$branch" != "Dev" ]]; then
+            echo "DEV deployments must use the Dev branch."
+            exit 1
+          fi
+
+          if [[ "$environment" == "UAT" && "$branch" != "UAT" ]]; then
+            echo "UAT deployments must use the UAT branch."
+            exit 1
+          fi
+
+          if [[ "$environment" == "PROD" && "$branch" != "main" ]]; then
+            echo "PROD deployments must use the main branch."
+            exit 1
+          fi
+
+      # ======================================================== 
+      # SETUP .NET 
+      # ========================================================
+      - name: Setup .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Display .NET information
+        run: dotnet --info
+
+      # ======================================================== 
+      # RESTORE 
+      # ========================================================
+      - name: Restore projects
+        run: dotnet restore ADIBSolution.sln
+
+      # ======================================================== 
+      # BUILD 
+      # ========================================================
+      - name: Build UserManagement
+        run: |
+          dotnet build ${{env.PROJECT_PATH}} \
+            --configuration ${{env.CONFIGURATION}} \
+            --no-restore
+
+      # ========================================================
+      # PUBLISH
+      # Only publish for push/manual.
+      # PR only performs build validation.
+      # ========================================================
+      - name: Publish UserManagement
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          dotnet publish ${{env.PROJECT_PATH}} \
+            --configuration ${{ env.CONFIGURATION }} \
+            --no-build \
+            --output ./publish/UserManagement
+
+      # ======================================================== 
+      # VERIFY PACKAGE 
+      # ========================================================
+      - name: Verify Packages
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          echo "========================================="
+          echo "Published Packages"
+          echo "========================================="
+
+          if [ ! -d "./publish/UserManagement" ]; then
+            echo "ERROR: UserManagement packages was not created."
+            exit 1
+          fi
+
+          find ./publish -maxdepth 2 -type f -print | sed -n '1,50p'
+          if [ -z "$(find ./publish/UserManagement -type f -print -quit)" ]; then
+            echo "ERROR: UserManagement packages is empty"
+            exit 1
+          fi
+
+      # ======================================================== 
+      # UPLOAD ARTIFACT 
+      # ========================================================
+      - name: Upload Deployment Artifact
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: adib-api-packages
+          path: ./publish/UserManagement
+          if-no-files-found: error
+          retention-days: 10
+
+  # ============================================================
+  # DEV
+  # ============================================================
+  deploy-dev:
+    name: Deploy UserManagement to DEV
+    needs: build
+
+    if: |
+      (github.event_name == 'push' &&
+       github.ref == 'refs/heads/Dev') ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.environment == 'DEV')
+
+    runs-on: ubuntu-latest
+
+    environment:
+      name: DEV
+
+    steps:
+
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: usermanagement-dev-packages
+          path: ./publish/UserManagement
+
+      # ======================================================== 
+      # AZURE LOGIN USING SERVICE PRINCIPAL + CLIENT SECRET 
+      # ========================================================
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-secret: ${{secrets.AZURE_CLIENT_SECRET}}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ======================================================== 
+      # DEPLOY         
+      # ========================================================
+      - name: Deploy UserManagement
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.USERMANAGEMENT_APP_NAME }}
+          package: ./publish/UserManagement
+
+  # ============================================================
+  # UAT
+  # ============================================================
+  deploy-uat:
+    name: Deploy UserManagement to UAT
+    needs: build
+
+    if: |
+      (github.event_name == 'push' &&
+       github.ref == 'refs/heads/UAT') ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.environment == 'UAT')
+
+    runs-on: ubuntu-latest
+
+    environment:
+      name: UAT
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: usermanagement-uat-packages
+          path: ./publish/UserManagement
+
+      # ======================================================== 
+      # AZURE LOGIN USING SERVICE PRINCIPAL + CLIENT SECRET 
+      # ========================================================
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-secret: ${{secrets.AZURE_CLIENT_SECRET}}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ======================================================== 
+      # DEPLOY         
+      # ========================================================
+      - name: Deploy UserManagement
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.USERMANAGEMENT_APP_NAME }}
+          package: ./publish/UserManagement
+
+  # ============================================================
+  # PROD
+  # ============================================================
+  deploy-prod:
+    name: Deploy UserManagement to PROD
+    needs: build
+
+    if: |
+      (github.event_name == 'push' &&
+       github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.environment == 'PROD')
+
+    runs-on: ubuntu-latest
+
+    environment:
+      name: PROD
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: usermanagement-prod-packages
+          path: ./publish/UserManagement
+
+      # ======================================================== 
+      # AZURE LOGIN USING SERVICE PRINCIPAL + CLIENT SECRET 
+      # ========================================================
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-secret: ${{secrets.AZURE_CLIENT_SECRET}}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ======================================================== 
+      # DEPLOY         
+      # ========================================================
+      - name: Deploy UserManagement
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.USERMANAGEMENT_APP_NAME }}
+          package: ./publish/UserManagement
