@@ -1,0 +1,301 @@
+name: eLibrary CI-CD
+
+on:
+  # ============================================================
+  # AUTOMATIC DEPLOYMENT
+  # ============================================================
+  push:
+    branches:
+      - Dev
+      - UAT
+      - main
+
+    paths:
+      - 'eLibrary/**'
+
+
+  # ============================================================
+  # PR VALIDATION
+  # ============================================================
+  pull_request:
+    branches:
+      - Dev
+      - UAT
+      - main
+
+    paths:
+      - 'eLibrary/**'
+      
+  # ============================================================
+  # MANUAL DEPLOYMENT
+  # ============================================================
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select environment"
+        required: true
+        type: choice
+        options:
+          - DEV
+          - UAT
+          - PROD
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  DOTNET_VERSION: "6.0.x"
+  CONFIGURATION: Release
+  PROJECT_PATH: eLibrary/eLibrary.csproj
+
+jobs:
+
+  # ============================================================
+  # BUILD
+  # ============================================================
+  build:
+    name: Build eLibrary
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      # ========================================================
+      # VALIDATE BRANCH AND ENVIRONMENT 
+      # ========================================================
+      - name: Validate Branch and Environment
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          branch="${GITHUB_REF_NAME}"
+          environment="${{ inputs.environment }}"
+
+          echo "Branch      : $branch"
+          echo "Environment : $environment"
+
+          if [[ "$environment" == "DEV" && "$branch" != "Dev" ]]; then
+            echo "DEV deployments must use the Dev branch."
+            exit 1
+          fi
+
+          if [[ "$environment" == "UAT" && "$branch" != "UAT" ]]; then
+            echo "UAT deployments must use the UAT branch."
+            exit 1
+          fi
+
+          if [[ "$environment" == "PROD" && "$branch" != "main" ]]; then
+            echo "PROD deployments must use the main branch."
+            exit 1
+          fi
+
+      # ======================================================== 
+      # SETUP .NET 
+      # ========================================================
+      - name: Setup .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Display .NET information
+        run: dotnet --info
+
+      # ======================================================== 
+      # RESTORE 
+      # ========================================================
+      - name: Restore projects
+        run: dotnet restore ADIBSolution.sln
+
+      # ======================================================== 
+      # BUILD 
+      # ========================================================
+      - name: Build eLibrary
+        run: |
+          dotnet build ${{env.PROJECT_PATH}} \
+            --configuration ${{env.CONFIGURATION}} \
+            --no-restore
+
+      # ========================================================
+      # PUBLISH
+      # Only publish for push/manual.
+      # PR only performs build validation.
+      # ========================================================
+      - name: Publish eLibrary
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          dotnet publish ${{env.PROJECT_PATH}} \
+            --configuration ${{ env.CONFIGURATION }} \
+            --no-build \
+            --output ./publish/eLibrary
+
+      # ======================================================== 
+      # VERIFY PACKAGE 
+      # ========================================================
+      - name: Verify Packages
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          echo "========================================="
+          echo "Published Packages"
+          echo "========================================="
+
+          if [ ! -d "./publish/eLibrary" ]; then
+            echo "ERROR: eLibrary packages was not created."
+            exit 1
+          fi
+
+          find ./publish -maxdepth 2 -type f -print | sed -n '1,50p'
+          if [ -z "$(find ./publish/eLibrary -type f -print -quit)" ]; then
+            echo "ERROR: eLibrary packages is empty"
+            exit 1
+          fi
+
+      # ======================================================== 
+      # UPLOAD ARTIFACT 
+      # ========================================================
+      - name: Upload Artifact
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: adib-api-packages
+          path: ./publish/eLibrary
+          if-no-files-found: error
+          retention-days: 10
+
+  # ============================================================
+  # DEV
+  # ============================================================
+  deploy-dev:
+    name: Deploy eLibrary to DEV
+    needs: build
+
+    if: |
+      (github.event_name == 'push' &&
+       github.ref == 'refs/heads/Dev') ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.environment == 'DEV')
+
+    runs-on: ubuntu-latest
+
+    environment:
+      name: DEV
+
+    steps:
+
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: elibrary-dev-packages
+          path: ./publish/elibrary
+
+      # ======================================================== 
+      # AZURE LOGIN USING SERVICE PRINCIPAL + CLIENT SECRET 
+      # ========================================================
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-secret: ${{secrets.AZURE_CLIENT_SECRET}}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ======================================================== 
+      # DEPLOY         
+      # ========================================================
+      - name: Deploy eLibrary
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.ELIBRARY_APP_NAME }}
+          package: ./publish/eLibrary
+
+  # ============================================================
+  # UAT
+  # ============================================================
+  deploy-uat:
+    name: Deploy to UAT
+    needs: build
+
+    if: |
+      (github.event_name == 'push' &&
+       github.ref == 'refs/heads/UAT') ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.environment == 'UAT')
+
+    runs-on: ubuntu-latest
+
+    environment:
+      name: UAT
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: elibrary-uat-packages
+          path: ./publish/eLibrary
+
+      # ======================================================== 
+      # AZURE LOGIN USING SERVICE PRINCIPAL + CLIENT SECRET 
+      # ========================================================
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-secret: ${{secrets.AZURE_CLIENT_SECRET}}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ======================================================== 
+      # DEPLOY         
+      # ========================================================
+      - name: Deploy eLibrary
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.ELIBRARY_APP_NAME }}
+          package: ./publish/eLibrary
+
+  # ============================================================
+  # PROD
+  # ============================================================
+  deploy-prod:
+    name: Deploy to PROD
+    needs: build
+
+    if: |
+      (github.event_name == 'push' &&
+       github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.environment == 'PROD')
+
+    runs-on: ubuntu-latest
+
+    environment:
+      name: PROD
+
+    steps:
+      - name: Download deployment artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: elibrary-prod-packages
+          path: ./publish/eLibrary
+
+      # ======================================================== 
+      # AZURE LOGIN USING SERVICE PRINCIPAL + CLIENT SECRET 
+      # ========================================================
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-secret: ${{secrets.AZURE_CLIENT_SECRET}}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ======================================================== 
+      # DEPLOY         
+      # ========================================================
+      - name: Deploy eLibrary
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.ELIBRARY_APP_NAME }}
+          package: ./publish/eLibrary
