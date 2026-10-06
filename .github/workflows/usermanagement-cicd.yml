@@ -159,7 +159,7 @@ jobs:
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: adib-api-packages
+          name: usermanagement-package
           path: ./publish/UserManagement
           if-no-files-found: error
           retention-days: 10
@@ -187,7 +187,7 @@ jobs:
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
-          name: usermanagement-dev-packages
+          name: usermanagement-package
           path: ./publish/UserManagement
 
       # ======================================================== 
@@ -232,7 +232,7 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: usermanagement-uat-packages
+          name: usermanagement-package
           path: ./publish/UserManagement
 
       # ======================================================== 
@@ -277,7 +277,7 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: usermanagement-prod-packages
+          name: usermanagement-package
           path: ./publish/UserManagement
 
       # ======================================================== 
