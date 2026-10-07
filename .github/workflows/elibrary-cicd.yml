@@ -123,43 +123,43 @@ jobs:
       # PR only performs build validation.
       # ========================================================
       - name: Publish eLibrary
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: github.event_name != 'pull_request'
         run: |
           dotnet publish ${{env.PROJECT_PATH}} \
             --configuration ${{ env.CONFIGURATION }} \
             --no-build \
             --output ./publish/eLibrary
 
-      # ======================================================== 
-      # VERIFY PACKAGE 
-      # ========================================================
-      - name: Verify Packages
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        shell: bash
-        run: |
-          echo "========================================="
-          echo "Published Packages"
-          echo "========================================="
+      # # ======================================================== 
+      # # VERIFY PACKAGE 
+      # # ========================================================
+      # - name: Verify Packages
+      #   if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+      #   shell: bash
+      #   run: |
+      #     echo "========================================="
+      #     echo "Published Packages"
+      #     echo "========================================="
 
-          if [ ! -d "./publish/eLibrary" ]; then
-            echo "ERROR: eLibrary packages was not created."
-            exit 1
-          fi
+      #     if [ ! -d "./publish/eLibrary" ]; then
+      #       echo "ERROR: eLibrary packages was not created."
+      #       exit 1
+      #     fi
 
-          find ./publish -maxdepth 2 -type f -print | sed -n '1,50p'
-          if [ -z "$(find ./publish/eLibrary -type f -print -quit)" ]; then
-            echo "ERROR: eLibrary packages is empty"
-            exit 1
-          fi
+      #     find ./publish -maxdepth 2 -type f -print | sed -n '1,50p'
+      #     if [ -z "$(find ./publish/eLibrary -type f -print -quit)" ]; then
+      #       echo "ERROR: eLibrary packages is empty"
+      #       exit 1
+      #     fi
 
       # ======================================================== 
       # UPLOAD ARTIFACT 
       # ========================================================
       - name: Upload Artifact
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: adib-api-packages
+          name: elibrary-package
           path: ./publish/eLibrary
           if-no-files-found: error
           retention-days: 10
@@ -187,8 +187,8 @@ jobs:
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
-          name: elibrary-dev-packages
-          path: ./publish/elibrary
+          name: elibrary-package
+          path: ./publish/eLibrary
 
       # ======================================================== 
       # AZURE LOGIN USING SERVICE PRINCIPAL + CLIENT SECRET 
@@ -196,10 +196,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          client-secret: ${{secrets.AZURE_CLIENT_SECRET}}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       # ======================================================== 
       # DEPLOY         
@@ -232,7 +229,7 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: elibrary-uat-packages
+          name: elibrary-package
           path: ./publish/eLibrary
 
       # ======================================================== 
@@ -241,10 +238,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          client-secret: ${{secrets.AZURE_CLIENT_SECRET}}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       # ======================================================== 
       # DEPLOY         
@@ -277,7 +271,7 @@ jobs:
       - name: Download deployment artifact
         uses: actions/download-artifact@v4
         with:
-          name: elibrary-prod-packages
+          name: elibrary-package
           path: ./publish/eLibrary
 
       # ======================================================== 
@@ -286,10 +280,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          client-secret: ${{secrets.AZURE_CLIENT_SECRET}}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       # ======================================================== 
       # DEPLOY         
