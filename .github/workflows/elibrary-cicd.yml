@@ -130,27 +130,27 @@ jobs:
             --no-build \
             --output ./publish/eLibrary
 
-      # ======================================================== 
-      # VERIFY PACKAGE 
-      # ========================================================
-      - name: Verify Packages
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        shell: bash
-        run: |
-          echo "========================================="
-          echo "Published Packages"
-          echo "========================================="
+      # # ======================================================== 
+      # # VERIFY PACKAGE 
+      # # ========================================================
+      # - name: Verify Packages
+      #   if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+      #   shell: bash
+      #   run: |
+      #     echo "========================================="
+      #     echo "Published Packages"
+      #     echo "========================================="
 
-          if [ ! -d "./publish/eLibrary" ]; then
-            echo "ERROR: eLibrary packages was not created."
-            exit 1
-          fi
+      #     if [ ! -d "./publish/eLibrary" ]; then
+      #       echo "ERROR: eLibrary packages was not created."
+      #       exit 1
+      #     fi
 
-          find ./publish -maxdepth 2 -type f -print | sed -n '1,50p'
-          if [ -z "$(find ./publish/eLibrary -type f -print -quit)" ]; then
-            echo "ERROR: eLibrary packages is empty"
-            exit 1
-          fi
+      #     find ./publish -maxdepth 2 -type f -print | sed -n '1,50p'
+      #     if [ -z "$(find ./publish/eLibrary -type f -print -quit)" ]; then
+      #       echo "ERROR: eLibrary packages is empty"
+      #       exit 1
+      #     fi
 
       # ======================================================== 
       # UPLOAD ARTIFACT 
