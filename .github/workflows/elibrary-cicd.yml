@@ -123,7 +123,7 @@ jobs:
       # PR only performs build validation.
       # ========================================================
       - name: Publish eLibrary
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: github.event_name != 'pull_request'
         run: |
           dotnet publish ${{env.PROJECT_PATH}} \
             --configuration ${{ env.CONFIGURATION }} \
@@ -156,7 +156,7 @@ jobs:
       # UPLOAD ARTIFACT 
       # ========================================================
       - name: Upload Artifact
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: elibrary-package
