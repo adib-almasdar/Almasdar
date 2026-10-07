@@ -188,7 +188,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: elibrary-package
-          path: ./publish/elibrary
+          path: ./publish/eLibrary
 
       # ======================================================== 
       # AZURE LOGIN USING SERVICE PRINCIPAL + CLIENT SECRET 
