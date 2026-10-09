@@ -12,6 +12,9 @@ using Microsoft.Identity.Web;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// adding health check service
+builder.Services.AddHealthChecks();
+
 // Add services to the container.
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
@@ -67,7 +70,7 @@ app.UseSwaggerUI();
 //}
 
 app.UseHttpsRedirection();
-
+app.MapHealthChecks("/healthz");
 //Add middleware here
 app.CallRequestMiddleware();
 app.CallResponseMiddleware();
