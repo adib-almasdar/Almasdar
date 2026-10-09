@@ -1,0 +1,189 @@
+name: UserManagement Automatic Rollback
+
+on:
+  workflow_run:
+    workflows:
+      - UserManagement CI-CD
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  rollback:
+    name: Rollback UserManagement
+    if: |
+      github.event.workflow_run.conclusion == 'failure' &&
+      (github.event.workflow_run.event == 'push' ||
+       github.event.workflow_run.event == 'workflow_dispatch') &&
+      contains(fromJSON('["Dev","UAT","main"]'),
+               github.event.workflow_run.head_branch)
+
+    runs-on: ubuntu-latest
+
+    # These environments must NOT have required reviewers.
+    # Configure their variables and AZURE_CREDENTIALS secret.
+    environment:
+      name: ${{ github.event.workflow_run.head_branch == 'Dev' && 'ROLLBACK-DEV' || github.event.workflow_run.head_branch == 'UAT' && 'ROLLBACK-UAT' || 'ROLLBACK-PROD' }}
+
+    steps:
+      # --------------------------------------------------------
+      # CONFIRM THAT THE DEPLOYMENT JOB ITSELF FAILED
+      # --------------------------------------------------------
+      - name: Check deployment job result
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          case "$BRANCH" in
+            Dev)  JOB_NAME="Deploy UserManagement to DEV" ;;
+            UAT)  JOB_NAME="Deploy UserManagement to UAT" ;;
+            main) JOB_NAME="Deploy UserManagement to PROD" ;;
+            *)
+              echo "Unsupported branch."
+              echo "should_rollback=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          gh api \
+            "repos/${GH_REPO}/actions/runs/${RUN_ID}/jobs?per_page=100" \
+            > jobs.json
+
+          FAILED=$(jq -r --arg job "$JOB_NAME" \
+            '[.jobs[] | select(.name == $job) | .conclusion]
+             | any(. == "failure")' jobs.json)
+
+          if [[ "$FAILED" != "true" ]]; then
+            echo "The deployment job did not fail."
+            echo "Skipping rollback."
+            echo "should_rollback=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Deployment job failed: $JOB_NAME"
+          echo "should_rollback=true" >> "$GITHUB_OUTPUT"
+
+      # --------------------------------------------------------
+      # AZURE LOGIN
+      # --------------------------------------------------------
+      - name: Azure login
+        if: steps.gate.outputs.should_rollback == 'true'
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # --------------------------------------------------------
+      # SELECT ENVIRONMENT PATH
+      # --------------------------------------------------------
+      - name: Set rollback configuration
+        if: steps.gate.outputs.should_rollback == 'true'
+        shell: bash
+        env:
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+
+          case "$BRANCH" in
+            Dev)  echo "ARTIFACT_PATH=UserManagement/dev" >> "$GITHUB_ENV" ;;
+            UAT)  echo "ARTIFACT_PATH=UserManagement/uat" >> "$GITHUB_ENV" ;;
+            main) echo "ARTIFACT_PATH=UserManagement/prod" >> "$GITHUB_ENV" ;;
+            *)
+              echo "Unsupported branch."
+              exit 1
+              ;;
+          esac
+
+      # --------------------------------------------------------
+      # DOWNLOAD LAST SUCCESSFUL PACKAGE
+      # --------------------------------------------------------
+      - name: Download previous successful package
+        if: steps.gate.outputs.should_rollback == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          az storage blob download \
+            --account-name "${{ vars.ARTIFACT_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.ARTIFACT_CONTAINER }}" \
+            --name "$ARTIFACT_PATH/latest-successful.txt" \
+            --file latest-successful.txt \
+            --auth-mode login \
+            --no-progress
+
+          PACKAGE_NAME=$(cat latest-successful.txt)
+
+          if [[ -z "$PACKAGE_NAME" ||
+                "$PACKAGE_NAME" == */* ||
+                "$PACKAGE_NAME" == *..* ]]; then
+            echo "Invalid previous package reference."
+            exit 1
+          fi
+
+          echo "Restoring package: $PACKAGE_NAME"
+
+          az storage blob download \
+            --account-name "${{ vars.ARTIFACT_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.ARTIFACT_CONTAINER }}" \
+            --name "$ARTIFACT_PATH/$PACKAGE_NAME" \
+            --file rollback-package.zip \
+            --auth-mode login \
+            --no-progress
+
+          test -s rollback-package.zip
+
+      # --------------------------------------------------------
+      # RESTORE PREVIOUS SUCCESSFUL DEPLOYMENT
+      # --------------------------------------------------------
+      - name: Redeploy previous successful package
+        if: steps.gate.outputs.should_rollback == 'true'
+        shell: bash
+        env:
+          RESOURCE_GROUP: ${{ vars.ARTIFACT_RESOURCE_GROUP }}
+          APP_NAME: ${{ vars.ELIBRARY_APP_NAME }}
+        run: |
+          set -euo pipefail
+
+          az webapp deploy \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --src-path ./rollback-package.zip \
+            --type zip
+
+      # --------------------------------------------------------
+      # VERIFY RESTORED APPLICATION
+      # --------------------------------------------------------
+      - name: Verify rollback health
+        if: steps.gate.outputs.should_rollback == 'true'
+        shell: bash
+        env:
+          HEALTH_URL: ${{ vars.ELIBRARY_HEALTHCHECK_URL }}
+        run: |
+          set -euo pipefail
+
+          test -n "$HEALTH_URL" || {
+            echo "Health-check URL is not configured."
+            exit 1
+          }
+
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error \
+              --max-time 10 "$HEALTH_URL"; then
+              echo "Rollback health check passed."
+              exit 0
+            fi
+
+            echo "Waiting for application recovery: $attempt"
+            sleep 10
+          done
+
+          echo "Rollback health check failed."
+          exit 1

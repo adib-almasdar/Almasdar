@@ -49,6 +49,13 @@ env:
   CONFIGURATION: Release
   PROJECT_PATH: eLibrary/eLibrary.csproj
 
+  # ============================================================ 
+  # BLOB ARTIFACT CONFIGURATION 
+  # Configure these as GitHub Environment Variables 
+  # for DEV/UAT/PROD or repository variables. 
+  # ============================================================ 
+  ARTIFACT_MODULE: eLibrary
+
 jobs:
 
   # ============================================================
@@ -125,6 +132,8 @@ jobs:
       - name: Publish eLibrary
         if: github.event_name != 'pull_request'
         run: |
+          rm -rf ./publish/elibrary
+
           dotnet publish ${{env.PROJECT_PATH}} \
             --configuration ${{ env.CONFIGURATION }} \
             --no-build \
@@ -153,14 +162,29 @@ jobs:
       #     fi
 
       # ======================================================== 
-      # UPLOAD ARTIFACT 
+      # CREATE ZIP PACKAGE 
+      # 
+      # This ZIP is used both for: 
+      # 1. Current deployment 
+      # 2. Blob Storage backup after successful deployment 
+      # ========================================================
+      - name: Create deployment ZIP
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          mkdir -p ./package
+          cd ./publish/eLibrary
+          zip -r ../../package/elibrary-package.zip .
+          
+      # ======================================================== 
+      # UPLOAD ARTIFACT FOR DEPLOYMENT JOB
       # ========================================================
       - name: Upload Artifact
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: elibrary-package
-          path: ./publish/eLibrary
+          path: ./package/elibrary-package.zip
           if-no-files-found: error
           retention-days: 10
 
@@ -188,7 +212,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: elibrary-package
-          path: ./publish/eLibrary
+          path: ./package
 
       # ======================================================== 
       # AZURE LOGIN USING SERVICE PRINCIPAL + CLIENT SECRET 
@@ -202,16 +226,72 @@ jobs:
       # DEPLOY         
       # ========================================================
       - name: Deploy eLibrary
+        id: deploy
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ vars.ELIBRARY_APP_NAME }}
-          package: ./publish/eLibrary
+          package: ./package/elibrary-package.zip
+
+      # ======================================================== 
+      # CHECK APPLICATION HEALTH
+      # ========================================================
+      - name: Check application health
+        shell: bash
+        env:
+          HEALTH_URL: ${{ vars.ELIBRARY_HEALTHCHECK_URL }}
+        run: |
+          test -n "$HEALTH_URL" || {
+            echo "ELIBRARY_HEALTHCHECK_URL is not configured."
+            exit 1
+          }
+
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error \
+              --max-time 10 "$HEALTH_URL"; then
+              echo "Health check passed."
+              exit 0
+            fi
+            echo "Health check attempt $attempt failed."
+            sleep 10
+          done
+
+          echo "Health check failed."
+          exit 1
+
+      # ======================================================== 
+      # SAVE SUCCESSFUL PACKAGE TO BLOB
+      # ========================================================
+      - name: Save successful package to Blob
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf -v RUN_NUMBER "%08d" "$GITHUB_RUN_NUMBER"
+          PACKAGE_NAME="build-${RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}.zip"
+          BLOB_PATH="eLibrary/dev"
+          
+          az storage blob upload \
+            --account-name "${{ vars.ARTIFACT_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.ARTIFACT_CONTAINER }}" \
+            --name "$BLOB_PATH/$PACKAGE_NAME" \
+            --file ./package/elibrary-package.zip \
+            --auth-mode login \
+            --overwrite false
+          
+          printf '%s' "$PACKAGE_NAME" > latest-successful.txt
+
+          az storage blob upload \
+            --account-name "${{ vars.ARTIFACT_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.ARTIFACT_CONTAINER }}" \
+            --name "$BLOB_PATH/latest-successful.txt" \
+            --file latest-successful.txt \
+            --auth-mode login \
+            --overwrite true
 
   # ============================================================
   # UAT
   # ============================================================
   deploy-uat:
-    name: Deploy to UAT
+    name: Deploy eLibrary to UAT
     needs: build
 
     if: |
@@ -230,7 +310,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: elibrary-package
-          path: ./publish/eLibrary
+          path: ./package
 
       # ======================================================== 
       # AZURE LOGIN USING SERVICE PRINCIPAL + CLIENT SECRET 
@@ -247,13 +327,68 @@ jobs:
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ vars.ELIBRARY_APP_NAME }}
-          package: ./publish/eLibrary
+          package: ./package/elibrary-package.zip
+
+      # ======================================================== 
+      # CHECK APPLICATION HEALTH
+      # ========================================================
+      - name: Check application health
+        shell: bash
+        env:
+          HEALTH_URL: ${{ vars.ELIBRARY_HEALTHCHECK_URL }}
+        run: |
+          test -n "$HEALTH_URL" || {
+            echo "ELIBRARY_HEALTHCHECK_URL is not configured."
+            exit 1
+          }
+
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error \
+              --max-time 10 "$HEALTH_URL"; then
+              echo "Health check passed."
+              exit 0
+            fi
+            echo "Health check attempt $attempt failed."
+            sleep 10
+          done
+
+          echo "Health check failed."
+          exit 1
+
+      # ======================================================== 
+      # SAVE SUCCESSFUL PACKAGE TO BLOB
+      # ========================================================
+      - name: Save successful package to Blob
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf -v RUN_NUMBER "%08d" "$GITHUB_RUN_NUMBER"
+          PACKAGE_NAME="build-${RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}.zip"
+          BLOB_PATH="eLibrary/uat"
+          
+          az storage blob upload \
+            --account-name "${{ vars.ARTIFACT_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.ARTIFACT_CONTAINER }}" \
+            --name "$BLOB_PATH/$PACKAGE_NAME" \
+            --file ./package/elibrary-package.zip \
+            --auth-mode login \
+            --overwrite false
+          
+          printf '%s' "$PACKAGE_NAME" > latest-successful.txt
+
+          az storage blob upload \
+            --account-name "${{ vars.ARTIFACT_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.ARTIFACT_CONTAINER }}" \
+            --name "$BLOB_PATH/latest-successful.txt" \
+            --file latest-successful.txt \
+            --auth-mode login \
+            --overwrite true
 
   # ============================================================
   # PROD
   # ============================================================
   deploy-prod:
-    name: Deploy to PROD
+    name: Deploy eLibrary to PROD
     needs: build
 
     if: |
@@ -272,7 +407,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: elibrary-package
-          path: ./publish/eLibrary
+          path: ./package
 
       # ======================================================== 
       # AZURE LOGIN USING SERVICE PRINCIPAL + CLIENT SECRET 
@@ -289,4 +424,59 @@ jobs:
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ vars.ELIBRARY_APP_NAME }}
-          package: ./publish/eLibrary
+          package: ./package/elibrary-package.zip
+      
+      # ======================================================== 
+      # CHECK APPLICATION HEALTH
+      # ========================================================
+      - name: Check application health
+        shell: bash
+        env:
+          HEALTH_URL: ${{ vars.ELIBRARY_HEALTHCHECK_URL }}
+        run: |
+          test -n "$HEALTH_URL" || {
+            echo "ELIBRARY_HEALTHCHECK_URL is not configured."
+            exit 1
+          }
+
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error \
+              --max-time 10 "$HEALTH_URL"; then
+              echo "Health check passed."
+              exit 0
+            fi
+            echo "Health check attempt $attempt failed."
+            sleep 10
+          done
+
+          echo "Health check failed."
+          exit 1
+
+      # ======================================================== 
+      # SAVE SUCCESSFUL PACKAGE TO BLOB
+      # ========================================================
+      - name: Save successful package to Blob
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf -v RUN_NUMBER "%08d" "$GITHUB_RUN_NUMBER"
+          PACKAGE_NAME="build-${RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}.zip"
+          BLOB_PATH="eLibrary/prod"
+          
+          az storage blob upload \
+            --account-name "${{ vars.ARTIFACT_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.ARTIFACT_CONTAINER }}" \
+            --name "$BLOB_PATH/$PACKAGE_NAME" \
+            --file ./package/elibrary-package.zip \
+            --auth-mode login \
+            --overwrite false
+          
+          printf '%s' "$PACKAGE_NAME" > latest-successful.txt
+
+          az storage blob upload \
+            --account-name "${{ vars.ARTIFACT_STORAGE_ACCOUNT }}" \
+            --container-name "${{ vars.ARTIFACT_CONTAINER }}" \
+            --name "$BLOB_PATH/latest-successful.txt" \
+            --file latest-successful.txt \
+            --auth-mode login \
+            --overwrite true

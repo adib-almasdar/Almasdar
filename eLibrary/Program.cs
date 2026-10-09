@@ -17,6 +17,9 @@ using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// adding health check service
+builder.Services.AddHealthChecks();
+
 // Add services to the container.
 builder.Services.AddTransient<IDataClass1, DataClass1>();
 builder.Services.AddTransient<ISubCategoriesService, SubCategoriesService>();
@@ -108,6 +111,7 @@ app.UseSwaggerUI();
 //}
 
 app.UseHttpsRedirection();
+app.MapHealthChecks("/healthz");
 
 //Add middleware here
 app.CallRequestMiddleware();
