@@ -270,7 +270,7 @@ jobs:
           BLOB_PATH="eLibrary/dev"
           
           az storage blob upload \
-            --account-name "${{ vars.ARTIFACT_CONTAINER }}" \
+            --account-name "${{ vars.ARTIFACT_STORAGE_ACCOUNT }}" \
             --container-name "${{ vars.ARTIFACT_CONTAINER }}" \
             --name "$BLOB_PATH/$PACKAGE_NAME" \
             --file ./package/elibrary-package.zip \
@@ -280,7 +280,7 @@ jobs:
           printf '%s' "$PACKAGE_NAME" > latest-successful.txt
 
           az storage blob upload \
-            --account-name "${{ vars.ARTIFACT_CONTAINER }}" \
+            --account-name "${{ vars.ARTIFACT_STORAGE_ACCOUNT }}" \
             --container-name "${{ vars.ARTIFACT_CONTAINER }}" \
             --name "$BLOB_PATH/latest-successful.txt" \
             --file latest-successful.txt \
